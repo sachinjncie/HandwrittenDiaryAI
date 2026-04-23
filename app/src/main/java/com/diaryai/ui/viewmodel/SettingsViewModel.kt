@@ -27,7 +27,7 @@ class SettingsViewModel @Inject constructor(
 
     // ── Google Sign-In ───────────────────────────────────────────────────
 
-    fun getGoogleSignInIntent(): Intent = googleAuthManager.signInClient.signInIntent
+    fun getGoogleSignInIntent(withDriveScope: Boolean = false): Intent = googleAuthManager.getSignInIntent(withDriveScope)
 
     fun handleGoogleSignInResult(data: Intent?) {
         googleAuthManager.handleSignInResult(data)

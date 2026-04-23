@@ -58,7 +58,14 @@ class GemmaModelManager @Inject constructor(
 
     private val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
 
-    val modelDir: File get() = File(context.filesDir, "models").also { it.mkdirs() }
+    val modelDir: File get() {
+        // DownloadManager cannot write to internal storage (filesDir).
+        // Use getExternalFilesDir which is app-private but on external storage.
+        val dir = context.getExternalFilesDir("models")
+            ?: File(context.filesDir, "models")  // fallback if external not available
+        dir.mkdirs()
+        return dir
+    }
     val modelFile: File get() = File(modelDir, MODEL_FILENAME)
 
     val isModelReady: Boolean get() = modelFile.exists() && modelFile.length() > 10_000_000L
@@ -90,7 +97,10 @@ class GemmaModelManager @Inject constructor(
                 setTitle("Gemma AI Model")
                 setDescription("Downloading on-device AI model ($MODEL_DISPLAY_NAME)…")
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                setDestinationUri(Uri.fromFile(File(modelDir, "$MODEL_FILENAME.download")))
+                // DownloadManager requires a URI that it can write to.
+                // External files dir is writable by DownloadManager and app-private.
+                val destFile = File(modelDir, "$MODEL_FILENAME.download")
+                setDestinationUri(Uri.fromFile(destFile))
                 setAllowedOverMetered(false)
                 setAllowedOverRoaming(false)
                 addRequestHeader("User-Agent", "HandwrittenDiaryAI/1.0")
@@ -140,7 +150,14 @@ class GemmaModelManager @Inject constructor(
                 DownloadManager.STATUS_SUCCESSFUL -> {
                     // Rename .download → final file
                     val tempFile = File(modelDir, "$MODEL_FILENAME.download")
-                    if (tempFile.exists()) tempFile.renameTo(modelFile)
+                    if (tempFile.exists()) {
+                        val success = tempFile.renameTo(modelFile)
+                        if (!success) {
+                            // Fallback: copy then delete
+                            tempFile.copyTo(modelFile, overwrite = true)
+                            tempFile.delete()
+                        }
+                    }
 
                     settingsManager.gemmaModelPath = modelFile.absolutePath
                     activeDownloadId = -1L

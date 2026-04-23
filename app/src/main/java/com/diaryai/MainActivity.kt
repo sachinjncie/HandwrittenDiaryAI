@@ -65,7 +65,6 @@ fun DiaryNavHost(startDestination: String, onOnboardingComplete: () -> Unit) {
             HomeScreen(
                 viewModel = viewModel,
                 onNewScan = {
-                    // Create session first, then go to scan screen
                     viewModel.createNewSession()
                     navController.navigate("scan_session")
                 },
@@ -77,13 +76,10 @@ fun DiaryNavHost(startDestination: String, onOnboardingComplete: () -> Unit) {
             )
         }
 
-        // ── NEW: Scan session screen ───────────────────────────────────────
         composable("scan_session") {
             ScanSessionScreen(
                 viewModel = viewModel,
-                onProceedToOcr = {
-                    navController.navigate("ocr_review")
-                },
+                onProceedToOcr = { navController.navigate("ocr_review") },
                 onBack = { navController.popBackStack() }
             )
         }
@@ -128,8 +124,21 @@ fun DiaryNavHost(startDestination: String, onOnboardingComplete: () -> Unit) {
             BackupScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
         }
 
+        // Settings now has a sub-route for Notion setup wizard
         composable("settings") {
-            SettingsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+            SettingsScreen(
+                viewModel = viewModel,
+                onNotionSetup = { navController.navigate("notion_setup") },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        // ── NEW: Notion setup wizard ──────────────────────────────────────
+        composable("notion_setup") {
+            NotionSetupScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() }
+            )
         }
     }
 }
