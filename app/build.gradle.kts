@@ -93,6 +93,7 @@ dependencies {
     ksp(libs.hilt.work.compiler)
 
     implementation(libs.mlkit.textrecog)
+    implementation(libs.mlkit.docscanner)
     implementation(libs.camera2)
     implementation(libs.camera.lifecycle)
     implementation(libs.camera.view)

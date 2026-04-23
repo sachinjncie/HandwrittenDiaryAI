@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -25,15 +24,21 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Check first-run
         val prefs = getSharedPreferences("diary_ai_app", Context.MODE_PRIVATE)
         val firstRun = prefs.getBoolean("first_run", true)
 
         setContent {
             DiaryAITheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    DiaryNavHost(startDestination = if (firstRun) "onboarding" else "home",
-                        onOnboardingComplete = { prefs.edit().putBoolean("first_run", false).apply() })
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    DiaryNavHost(
+                        startDestination = if (firstRun) "onboarding" else "home",
+                        onOnboardingComplete = {
+                            prefs.edit().putBoolean("first_run", false).apply()
+                        }
+                    )
                 }
             }
         }
@@ -50,7 +55,9 @@ fun DiaryNavHost(startDestination: String, onOnboardingComplete: () -> Unit) {
         composable("onboarding") {
             OnboardingScreen(onFinish = {
                 onOnboardingComplete()
-                navController.navigate("home") { popUpTo("onboarding") { inclusive = true } }
+                navController.navigate("home") {
+                    popUpTo("onboarding") { inclusive = true }
+                }
             })
         }
 
@@ -58,14 +65,26 @@ fun DiaryNavHost(startDestination: String, onOnboardingComplete: () -> Unit) {
             HomeScreen(
                 viewModel = viewModel,
                 onNewScan = {
+                    // Create session first, then go to scan screen
                     viewModel.createNewSession()
-                    navController.navigate("ocr_review")
+                    navController.navigate("scan_session")
                 },
                 onSessionClick = { sessionId ->
                     viewModel.loadSession(sessionId)
                     navController.navigate("ocr_review")
                 },
                 onNavigate = { route -> navController.navigate(route) }
+            )
+        }
+
+        // ── NEW: Scan session screen ───────────────────────────────────────
+        composable("scan_session") {
+            ScanSessionScreen(
+                viewModel = viewModel,
+                onProceedToOcr = {
+                    navController.navigate("ocr_review")
+                },
+                onBack = { navController.popBackStack() }
             )
         }
 
@@ -80,7 +99,11 @@ fun DiaryNavHost(startDestination: String, onOnboardingComplete: () -> Unit) {
         composable("ai_results") {
             AiResultsScreen(
                 viewModel = viewModel,
-                onDone = { navController.navigate("home") { popUpTo("home") { inclusive = false } } },
+                onDone = {
+                    navController.navigate("home") {
+                        popUpTo("home") { inclusive = false }
+                    }
+                },
                 onBack = { navController.popBackStack() }
             )
         }

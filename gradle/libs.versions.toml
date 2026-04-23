@@ -41,6 +41,7 @@ hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-com
 hilt-work = { group = "androidx.hilt", name = "hilt-work", version = "1.2.0" }
 hilt-work-compiler = { group = "androidx.hilt", name = "hilt-compiler", version = "1.2.0" }
 mlkit-textrecog = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkit-textrecog" }
+mlkit-docscanner = { group = "com.google.android.gms", name = "play-services-mlkit-document-scanner", version = "16.0.0-beta1" }
 camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camera2" }
 camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camera2" }
 camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camera2" }

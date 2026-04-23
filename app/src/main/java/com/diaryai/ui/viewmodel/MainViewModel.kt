@@ -12,6 +12,7 @@ import com.diaryai.sync.SyncReport
 import com.diaryai.backup.DriveBackupService
 import com.diaryai.backup.BackupResult
 import com.diaryai.util.SettingsManager
+import android.net.Uri
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -227,5 +228,60 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun clearMessage() { _uiState.value = _uiState.value.copy(message = null, error = null) }
+    // ── Scan page management ─────────────────────────────────────────────────
+
+    fun addScannedPage(uri: Uri, context: Context) = viewModelScope.launch {
+        val session = _currentSession.value ?: return@launch
+        try {
+            // Copy image to app-private storage
+            val scansDir = repo.getScansDirectory()
+            val destFile = java.io.File(scansDir, "scan_${session.id}_${System.currentTimeMillis()}.jpg")
+
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                destFile.outputStream().use { output -> input.copyTo(output) }
+            }
+
+            // Generate thumbnail
+            val thumbFile = java.io.File(scansDir, "thumb_${destFile.name}")
+            generateThumbnail(destFile, thumbFile)
+
+            val pageIndex = _currentPages.value.size
+            val page = repo.addPage(session.id, destFile.absolutePath, thumbFile.absolutePath, pageIndex)
+            _currentPages.value = _currentPages.value + page
+
+            // Update session page count
+            val updated = session.copy(pageCount = _currentPages.value.size)
+            repo.updateSession(updated)
+            _currentSession.value = updated
+        } catch (e: Exception) {
+            _uiState.value = UiState(error = "Failed to save scan: ${e.message}")
+        }
+    }
+
+    fun removeScannedPage(index: Int) = viewModelScope.launch {
+        val pages = _currentPages.value.toMutableList()
+        if (index < pages.size) {
+            val page = pages.removeAt(index)
+            java.io.File(page.imagePath).delete()
+            page.thumbnailPath?.let { java.io.File(it).delete() }
+            _currentPages.value = pages
+        }
+    }
+
+    private fun generateThumbnail(source: java.io.File, dest: java.io.File) {
+        try {
+            val bitmap = android.graphics.BitmapFactory.decodeFile(source.absolutePath) ?: return
+            val scale = minOf(400f / bitmap.width, 600f / bitmap.height)
+            val thumb = android.graphics.Bitmap.createScaledBitmap(
+                bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true
+            )
+            dest.outputStream().use { out ->
+                thumb.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, out)
+            }
+            bitmap.recycle()
+            thumb.recycle()
+        } catch (e: Exception) { /* thumb generation is best-effort */ }
+    }
+
+        fun clearMessage() { _uiState.value = _uiState.value.copy(message = null, error = null) }
 }
