@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <files-path name="diary_scans" path="scans/" />
+    <files-path name="diary_exports" path="exports/" />
+    <cache-path name="diary_cache" path="." />
+</paths>

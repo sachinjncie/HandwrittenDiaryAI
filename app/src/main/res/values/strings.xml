@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Handwritten Diary AI</string>
+    <string name="scan_page">Scan Page</string>
+    <string name="ocr_review">OCR Review</string>
+    <string name="ai_suggestions">AI Suggestions</string>
+    <string name="local_archive">Local Archive</string>
+    <string name="sync_center">Sync Center</string>
+    <string name="backup_restore">Backup &amp; Restore</string>
+    <string name="settings">Settings</string>
+</resources>

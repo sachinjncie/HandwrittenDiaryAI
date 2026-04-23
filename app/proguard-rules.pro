@@ -1,0 +1,12 @@
+-keep class com.diaryai.** { *; }
+-keep class com.google.mlkit.** { *; }
+-dontwarn com.google.mlkit.**
+-keepattributes *Annotation*
+-keepclassmembers class * extends androidx.room.RoomDatabase { abstract *; }
+-keep class androidx.room.** { *; }
+-dontwarn okhttp3.**
+-dontwarn retrofit2.**
+-keep class retrofit2.** { *; }
+-keepclasseswithmembers class * { @retrofit2.http.* <methods>; }
+-keep class com.google.gson.** { *; }
+-dontnote com.google.gson.**
