@@ -1,16 +1,10 @@
 package com.diaryai.service
 
 import android.app.DownloadManager
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.net.Uri
-import android.os.Build
-import android.os.Environment
 import com.diaryai.util.SettingsManager
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
 import java.io.File
 import javax.inject.Inject
@@ -31,18 +25,20 @@ data class ModelDownloadStatus(
 )
 
 /**
- * Manages the download of the Gemma 4 on-device model file.
+ * Manages the download of the Gemma on-device model (.task file).
  *
- * The model is a MediaPipe LLM Inference .task file.
- * Official model variants (from Google AI Edge / Kaggle Models):
- *   - gemma-3-1b-it-cpu-int8.task   (~537 MB)  — fastest, recommended for phones
- *   - gemma-3-2b-it-cpu-int4.task   (~1.1 GB)  — better quality, needs 4GB RAM
+ * ## How to get the model
+ * Gemma .task files are gated on HuggingFace — you need a free account and a token:
  *
- * Users must accept the Gemma license at https://ai.google.dev/gemma/terms
- * before the model can be downloaded.
+ *   1. Go to https://huggingface.co/litert-community/Gemma3-1B-IT
+ *   2. Accept the Gemma license (one-time, takes <1 minute)
+ *   3. Go to https://huggingface.co/settings/tokens and create a Read token
+ *   4. Copy the direct file URL:
+ *      https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-cpu-int4.task
+ *   5. Enter the URL + token in the app Settings → Gemma AI Model section
  *
- * In production: download via HuggingFace API token or Kaggle credentials.
- * For this build: uses a direct public URL pattern; swap in your signed URL.
+ * The download request includes an Authorization header with the token so
+ * DownloadManager can fetch the gated file.
  */
 @Singleton
 class GemmaModelManager @Inject constructor(
@@ -50,23 +46,34 @@ class GemmaModelManager @Inject constructor(
     private val settingsManager: SettingsManager
 ) {
     companion object {
-        // MediaPipe-compatible Gemma 3 1B INT8 model (smallest usable variant)
-        // Replace with actual signed URL from ai.google.dev or Kaggle
-        const val MODEL_URL_1B = "https://storage.googleapis.com/mediapipe-models/llm_inference/gemma-2b-it-gpu-int4/float16/1/model.bin"
-        const val MODEL_FILENAME = "gemma_model.task"
-        const val MODEL_DISPLAY_NAME = "Gemma 3 1B (INT8, ~537 MB)"
+        // Correct HuggingFace URLs for MediaPipe-ready Gemma 3 1B .task files
+        // These require license acceptance + HF token (free account)
+        const val MODEL_URL_CPU_INT4 =
+            "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-cpu-int4.task"
+        const val MODEL_URL_CPU_INT8 =
+            "https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-cpu-int8.task"
+
+        // HuggingFace model page — user must accept license here
+        const val HF_MODEL_PAGE = "https://huggingface.co/litert-community/Gemma3-1B-IT"
+        const val HF_TOKENS_PAGE = "https://huggingface.co/settings/tokens"
+
+        const val MODEL_FILENAME    = "gemma_model.task"
+        const val MODEL_DISPLAY_NAME = "Gemma 3 1B INT4 (~537 MB)"
     }
 
-    private val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+    private val downloadManager =
+        context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
 
-    val modelDir: File get() {
-        // DownloadManager cannot write to internal storage (filesDir).
-        // Use getExternalFilesDir which is app-private but on external storage.
-        val dir = context.getExternalFilesDir("models")
-            ?: File(context.filesDir, "models")  // fallback if external not available
-        dir.mkdirs()
-        return dir
-    }
+    val modelDir: File
+        get() {
+            // DownloadManager cannot write to internal storage (filesDir).
+            // Use getExternalFilesDir which is app-private but writable by DM.
+            val dir = context.getExternalFilesDir("models")
+                ?: File(context.filesDir, "models")
+            dir.mkdirs()
+            return dir
+        }
+
     val modelFile: File get() = File(modelDir, MODEL_FILENAME)
 
     val isModelReady: Boolean get() = modelFile.exists() && modelFile.length() > 10_000_000L
@@ -81,7 +88,19 @@ class GemmaModelManager @Inject constructor(
 
     private var activeDownloadId: Long = -1L
 
-    fun startDownload(modelUrl: String = MODEL_URL_1B, wifiOnly: Boolean = false) {
+    /**
+     * Start downloading the model.
+     *
+     * @param modelUrl  Direct URL to the .task file (HuggingFace resolve URL)
+     * @param hfToken   HuggingFace read token — required for gated Gemma models.
+     *                  Get one free at https://huggingface.co/settings/tokens
+     * @param wifiOnly  If true, pause download when only mobile data is available
+     */
+    fun startDownload(
+        modelUrl: String = MODEL_URL_CPU_INT4,
+        hfToken: String = "",
+        wifiOnly: Boolean = false
+    ) {
         if (isModelReady) {
             _status.value = ModelDownloadStatus(
                 state = ModelDownloadState.ALREADY_EXISTS,
@@ -93,26 +112,38 @@ class GemmaModelManager @Inject constructor(
 
         if (_status.value.state == ModelDownloadState.DOWNLOADING) return
 
+        if (hfToken.isBlank()) {
+            _status.value = ModelDownloadStatus(
+                state = ModelDownloadState.FAILED,
+                error = "HuggingFace token required — tap 'Get Model' to set it up"
+            )
+            return
+        }
+
         try {
             val request = DownloadManager.Request(Uri.parse(modelUrl)).apply {
                 setTitle("Gemma AI Model")
                 setDescription("Downloading on-device AI model ($MODEL_DISPLAY_NAME)…")
-                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                // DownloadManager requires a URI that it can write to.
-                // External files dir is writable by DownloadManager and app-private.
+                setNotificationVisibility(
+                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                )
                 val destFile = File(modelDir, "$MODEL_FILENAME.download")
                 setDestinationUri(Uri.fromFile(destFile))
-                // wifiOnly=true → block mobile data; wifiOnly=false → allow any connection
                 setAllowedOverMetered(!wifiOnly)
                 setAllowedOverRoaming(!wifiOnly)
-                addRequestHeader("User-Agent", "HandwrittenDiaryAI/1.0")
+                // HuggingFace requires Authorization header for gated model files
+                addRequestHeader("Authorization", "Bearer $hfToken")
+                addRequestHeader("User-Agent", "HandwrittenDiaryAI/1.4")
             }
 
             activeDownloadId = downloadManager.enqueue(request)
             _status.value = ModelDownloadStatus(state = ModelDownloadState.DOWNLOADING)
 
         } catch (e: Exception) {
-            _status.value = ModelDownloadStatus(state = ModelDownloadState.FAILED, error = e.message)
+            _status.value = ModelDownloadStatus(
+                state = ModelDownloadState.FAILED,
+                error = e.message
+            )
         }
     }
 
@@ -131,14 +162,14 @@ class GemmaModelManager @Inject constructor(
         val cursor = downloadManager.query(query)
 
         if (cursor.moveToFirst()) {
-            val statusCol = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
-            val bytesDownloaded = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-            val bytesTotal = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+            val statusCol     = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+            val bytesDownCol  = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+            val bytesTotalCol = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
 
-            val dlStatus = cursor.getInt(statusCol)
-            val downloaded = cursor.getLong(bytesDownloaded)
-            val total = cursor.getLong(bytesTotal)
-            val percent = if (total > 0) ((downloaded * 100) / total).toInt() else 0
+            val dlStatus   = cursor.getInt(statusCol)
+            val downloaded = cursor.getLong(bytesDownCol)
+            val total      = cursor.getLong(bytesTotalCol)
+            val percent    = if (total > 0) ((downloaded * 100) / total).toInt() else 0
 
             when (dlStatus) {
                 DownloadManager.STATUS_RUNNING -> {
@@ -158,17 +189,14 @@ class GemmaModelManager @Inject constructor(
                     )
                 }
                 DownloadManager.STATUS_SUCCESSFUL -> {
-                    // Rename .download → final file
                     val tempFile = File(modelDir, "$MODEL_FILENAME.download")
                     if (tempFile.exists()) {
                         val success = tempFile.renameTo(modelFile)
                         if (!success) {
-                            // Fallback: copy then delete
                             tempFile.copyTo(modelFile, overwrite = true)
                             tempFile.delete()
                         }
                     }
-
                     settingsManager.gemmaModelPath = modelFile.absolutePath
                     activeDownloadId = -1L
                     _status.value = ModelDownloadStatus(
@@ -179,17 +207,17 @@ class GemmaModelManager @Inject constructor(
                 }
                 DownloadManager.STATUS_FAILED -> {
                     val reasonCol = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
-                    val reason = cursor.getInt(reasonCol)
+                    val reason    = cursor.getInt(reasonCol)
                     val reasonMsg = when (reason) {
-                        DownloadManager.ERROR_CANNOT_RESUME         -> "Cannot resume — file may have changed"
-                        DownloadManager.ERROR_DEVICE_NOT_FOUND      -> "Storage not found"
-                        DownloadManager.ERROR_FILE_ALREADY_EXISTS   -> "File already exists"
-                        DownloadManager.ERROR_FILE_ERROR            -> "File write error — check storage space"
-                        DownloadManager.ERROR_HTTP_DATA_ERROR        -> "HTTP data error — try again"
-                        DownloadManager.ERROR_INSUFFICIENT_SPACE     -> "Not enough storage space"
-                        DownloadManager.ERROR_TOO_MANY_REDIRECTS    -> "Too many redirects — check URL"
-                        DownloadManager.ERROR_UNHANDLED_HTTP_CODE   -> "Server error — check URL"
-                        DownloadManager.ERROR_UNKNOWN               -> "Unknown error — check your connection"
+                        DownloadManager.ERROR_CANNOT_RESUME       -> "Cannot resume — file may have changed"
+                        DownloadManager.ERROR_DEVICE_NOT_FOUND    -> "Storage not found"
+                        DownloadManager.ERROR_FILE_ALREADY_EXISTS -> "File already exists"
+                        DownloadManager.ERROR_FILE_ERROR          -> "File write error — check storage space"
+                        DownloadManager.ERROR_HTTP_DATA_ERROR     -> "HTTP data error — try again"
+                        DownloadManager.ERROR_INSUFFICIENT_SPACE  -> "Not enough storage space"
+                        DownloadManager.ERROR_TOO_MANY_REDIRECTS  -> "Too many redirects — check URL"
+                        DownloadManager.ERROR_UNHANDLED_HTTP_CODE -> "Server error (403?) — check token & license"
+                        DownloadManager.ERROR_UNKNOWN             -> "Unknown error — check your connection"
                         else -> "Failed (code $reason)"
                     }
                     activeDownloadId = -1L
@@ -199,12 +227,13 @@ class GemmaModelManager @Inject constructor(
                     )
                 }
                 DownloadManager.STATUS_PAUSED -> {
-                    val reasonCol2 = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
+                    val reasonCol2  = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
                     val pauseReason = cursor.getInt(reasonCol2)
-                    val pauseMsg = when (pauseReason) {
+                    val pauseMsg    = when (pauseReason) {
                         DownloadManager.PAUSED_WAITING_FOR_NETWORK -> "Waiting for network…"
                         DownloadManager.PAUSED_WAITING_TO_RETRY    -> "Waiting to retry…"
-                        DownloadManager.PAUSED_QUEUED_FOR_WIFI     -> "Waiting for Wi-Fi — tap to switch to mobile data"
+                        DownloadManager.PAUSED_QUEUED_FOR_WIFI     ->
+                            "Waiting for Wi-Fi — tap to switch to mobile data"
                         else -> "Paused (reason $pauseReason)"
                     }
                     _status.value = _status.value.copy(

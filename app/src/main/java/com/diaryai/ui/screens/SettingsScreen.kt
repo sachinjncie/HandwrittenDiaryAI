@@ -12,8 +12,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.diaryai.service.GemmaModelManager
 import com.diaryai.service.ModelDownloadState
 import com.diaryai.ui.viewmodel.MainViewModel
 import com.diaryai.ui.viewmodel.SettingsViewModel
@@ -31,14 +34,17 @@ fun SettingsScreen(
     val googleAuthState by settingsViewModel.googleAuthState.collectAsState()
     val modelStatus by settingsViewModel.modelDownloadStatus.collectAsState()
 
-    var autoSync by remember { mutableStateOf(settings.autoSyncEnabled) }
+    var autoSync   by remember { mutableStateOf(settings.autoSyncEnabled) }
     var autoBackup by remember { mutableStateOf(settings.autoBackupEnabled) }
-    var showModelUrlDialog by remember { mutableStateOf(false) }
-    var customModelUrl by remember { mutableStateOf("") }
     var wifiOnlyDownload by remember { mutableStateOf(false) }
-    var showDriveGuide by remember { mutableStateOf(googleAuthState.needsSetup) }
+    var showDriveGuide   by remember { mutableStateOf(googleAuthState.needsSetup) }
 
-    // Update guide visibility when auth state changes
+    // Gemma download dialog state
+    var showGemmaSetupDialog by remember { mutableStateOf(false) }
+    var gemmaModelUrl by remember { mutableStateOf(GemmaModelManager.MODEL_URL_CPU_INT4) }
+    var gemmaHfToken  by remember { mutableStateOf("") }
+    var showToken     by remember { mutableStateOf(false) }
+
     LaunchedEffect(googleAuthState.needsSetup) {
         if (googleAuthState.needsSetup) showDriveGuide = true
     }
@@ -61,7 +67,11 @@ fun SettingsScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") } }
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, "Back")
+                    }
+                }
             )
         }
     ) { padding ->
@@ -77,11 +87,13 @@ fun SettingsScreen(
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         val configured = settings.isNotionConfigured
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Icon(
                                 if (configured) Icons.Default.CheckCircle else Icons.Default.Cloud,
                                 null,
-                                tint = if (configured) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                                tint = if (configured) MaterialTheme.colorScheme.tertiary
+                                       else MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(28.dp)
                             )
                             Column(Modifier.weight(1f)) {
@@ -98,10 +110,7 @@ fun SettingsScreen(
                                 )
                             }
                         }
-                        Button(
-                            onClick = onNotionSetup,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
+                        Button(onClick = onNotionSetup, modifier = Modifier.fillMaxWidth()) {
                             Icon(if (configured) Icons.Default.Edit else Icons.Default.OpenInBrowser, null)
                             Spacer(Modifier.width(8.dp))
                             Text(if (configured) "Edit Notion Settings" else "Set Up Notion (Step-by-step Guide)")
@@ -110,26 +119,28 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Google Drive ───────────────────────────────────────────────
+            // ── Google Drive ──────────────────────────────────────────────
             item { SectionHeader("Google Drive Backup") }
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-
                         if (googleAuthState.isSignedIn) {
                             Row(verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Icon(Icons.Default.AccountCircle, null,
-                                    tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(32.dp))
+                                    tint = MaterialTheme.colorScheme.tertiary,
+                                    modifier = Modifier.size(32.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(googleAuthState.accountName ?: "Google Account",
-                                        style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold)
                                     Text(googleAuthState.accountEmail ?: "",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                                 }
                                 Icon(Icons.Default.CheckCircle, null,
-                                    tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(20.dp))
+                                    tint = MaterialTheme.colorScheme.tertiary,
+                                    modifier = Modifier.size(20.dp))
                             }
                             Text("Encrypted Drive backup active.",
                                 style = MaterialTheme.typography.bodySmall)
@@ -141,11 +152,9 @@ fun SettingsScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Text("Sign Out")
                             }
-
                         } else {
                             Text("Tap below to sign in with Google. Backups are stored in a private app folder — not visible in your Drive.",
                                 style = MaterialTheme.typography.bodySmall)
-
                             Button(
                                 onClick = {
                                     val intent = settingsViewModel.getGoogleSignInIntent(withDriveScope = false)
@@ -157,14 +166,10 @@ fun SettingsScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Text("Sign in with Google")
                             }
-
-                            // Error message
                             googleAuthState.error?.let { err ->
                                 Text(err, style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.error)
                             }
-
-                            // One-time SHA-1 setup guide
                             if (googleAuthState.needsSetup || showDriveGuide) {
                                 DriveSetupGuide(
                                     context = context,
@@ -176,16 +181,19 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Gemma AI Model ─────────────────────────────────────────────
+            // ── Gemma AI Model ────────────────────────────────────────────
             item { SectionHeader("Gemma AI Model") }
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Psychology, null, tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Psychology, null,
+                                tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(8.dp))
                             Column(Modifier.weight(1f)) {
-                                Text("On-Device Gemma AI", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                Text("On-Device Gemma AI",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold)
                                 Text("OCR correction · Task extraction · Knowledge generation",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
@@ -193,53 +201,92 @@ fun SettingsScreen(
                         }
 
                         when (modelStatus.state) {
+
                             ModelDownloadState.IDLE, ModelDownloadState.FAILED -> {
                                 if (modelStatus.state == ModelDownloadState.FAILED) {
                                     Row(verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Icon(Icons.Default.Error, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.Error, null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(16.dp))
                                         Text(modelStatus.error ?: "Download failed",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.error)
                                     }
                                 } else {
-                                    Text("Model not downloaded. ~537 MB.",
+                                    Text("Model not downloaded. Gemma 3 1B INT4 (~537 MB).",
                                         style = MaterialTheme.typography.bodySmall)
                                 }
-                                // Network toggle
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Wi-Fi only", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                                        Text(if (wifiOnlyDownload) "Will wait for Wi-Fi" else "Download on any connection (mobile data OK)",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+
+                                // Gemma requires a free HuggingFace account + token
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text("Requires free HuggingFace account",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                        Text(
+                                            "Gemma is a gated model — Google requires a free license " +
+                                            "agreement before you can download it. Tap 'Get Model' to " +
+                                            "open the HuggingFace page, accept the license, then create " +
+                                            "a free Read token and paste it here.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
                                     }
-                                    Switch(checked = wifiOnlyDownload, onCheckedChange = { wifiOnlyDownload = it })
                                 }
+
+                                // Open HuggingFace model page
+                                OutlinedButton(
+                                    onClick = {
+                                        context.openUrl(GemmaModelManager.HF_MODEL_PAGE)
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.OpenInBrowser, null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Step 1: Accept License on HuggingFace")
+                                }
+
+                                // Open HF tokens page
+                                OutlinedButton(
+                                    onClick = {
+                                        context.openUrl(GemmaModelManager.HF_TOKENS_PAGE)
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Key, null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Step 2: Get Free Read Token")
+                                }
+
+                                // Enter token + start download
                                 Button(
-                                    onClick = { settingsViewModel.downloadGemmaModel(wifiOnly = wifiOnlyDownload) },
+                                    onClick = { showGemmaSetupDialog = true },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Icon(Icons.Default.CloudDownload, null)
                                     Spacer(Modifier.width(8.dp))
-                                    Text(if (modelStatus.state == ModelDownloadState.FAILED) "Retry Download" else "Download Gemma AI Model (~537 MB)")
-                                }
-                                OutlinedButton(
-                                    onClick = { showModelUrlDialog = true },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.Link, null)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Use Custom Model URL")
+                                    Text(
+                                        if (modelStatus.state == ModelDownloadState.FAILED)
+                                            "Step 3: Retry with Token"
+                                        else
+                                            "Step 3: Enter Token & Download"
+                                    )
                                 }
                             }
 
                             ModelDownloadState.DOWNLOADING -> {
-                                // Status detail line (queued / paused / downloading)
                                 val detailText: String = when {
                                     modelStatus.statusDetail != null -> modelStatus.statusDetail!!
-                                    modelStatus.totalMb > 0 -> "Downloading ${modelStatus.downloadedMb.toInt()} / ${modelStatus.totalMb.toInt()} MB (${modelStatus.progressPercent}%)"
+                                    modelStatus.totalMb > 0 ->
+                                        "Downloading ${modelStatus.downloadedMb.toInt()} / ${modelStatus.totalMb.toInt()} MB (${modelStatus.progressPercent}%)"
                                     else -> "Connecting…"
                                 }
                                 Text(detailText, style = MaterialTheme.typography.bodySmall,
@@ -256,13 +303,17 @@ fun SettingsScreen(
                                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                                 }
 
-                                // Show "switch to mobile data" if waiting for Wi-Fi
+                                // Switch to mobile data
                                 if (modelStatus.statusDetail?.contains("Wi-Fi") == true ||
                                     modelStatus.statusDetail?.contains("network") == true) {
                                     Button(
                                         onClick = {
                                             settingsViewModel.cancelModelDownload()
-                                            settingsViewModel.downloadGemmaModel(wifiOnly = false)
+                                            settingsViewModel.downloadGemmaModel(
+                                                url      = gemmaModelUrl.ifBlank { GemmaModelManager.MODEL_URL_CPU_INT4 },
+                                                hfToken  = gemmaHfToken,
+                                                wifiOnly = false
+                                            )
                                         },
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
@@ -286,7 +337,8 @@ fun SettingsScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Icon(Icons.Default.CheckCircle, null,
-                                        tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(20.dp))
+                                        tint = MaterialTheme.colorScheme.tertiary,
+                                        modifier = Modifier.size(20.dp))
                                     Text("AI model ready — all features active",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.tertiary)
@@ -305,7 +357,7 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Automation ─────────────────────────────────────────────────
+            // ── Automation ───────────────────────────────────────────────
             item { SectionHeader("Automation") }
             item {
                 Card(Modifier.fillMaxWidth()) {
@@ -316,7 +368,8 @@ fun SettingsScreen(
                                 Text("Auto-Sync to Notion", style = MaterialTheme.typography.bodyMedium)
                                 Text("Every 6h on Wi-Fi", style = MaterialTheme.typography.bodySmall)
                             }
-                            Switch(checked = autoSync, onCheckedChange = { autoSync = it; settings.autoSyncEnabled = it })
+                            Switch(checked = autoSync,
+                                onCheckedChange = { autoSync = it; settings.autoSyncEnabled = it })
                         }
                         HorizontalDivider(Modifier.padding(vertical = 8.dp))
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
@@ -325,19 +378,23 @@ fun SettingsScreen(
                                 Text("Auto-Backup to Drive", style = MaterialTheme.typography.bodyMedium)
                                 Text("Daily on Wi-Fi + charging", style = MaterialTheme.typography.bodySmall)
                             }
-                            Switch(checked = autoBackup, onCheckedChange = { autoBackup = it; settings.autoBackupEnabled = it })
+                            Switch(checked = autoBackup,
+                                onCheckedChange = { autoBackup = it; settings.autoBackupEnabled = it })
                         }
                     }
                 }
             }
 
-            // ── About ──────────────────────────────────────────────────────
+            // ── About ────────────────────────────────────────────────────
             item { SectionHeader("About") }
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Handwritten Diary AI v1.2.0", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                        Text("Local-first · Notion Free · Google Drive backup", style = MaterialTheme.typography.bodySmall)
+                        Text("Handwritten Diary AI v1.4.0",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold)
+                        Text("Local-first · Notion Sync · Google Drive Backup",
+                            style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(4.dp))
                         Text("Kotlin · Jetpack Compose · Room · ML Kit · WorkManager",
                             style = MaterialTheme.typography.labelSmall,
@@ -348,31 +405,88 @@ fun SettingsScreen(
         }
     }
 
-    // ── Custom model URL dialog ────────────────────────────────────────────
-    if (showModelUrlDialog) {
+    // ── Gemma Setup Dialog ────────────────────────────────────────────────
+    if (showGemmaSetupDialog) {
         AlertDialog(
-            onDismissRequest = { showModelUrlDialog = false },
-            title = { Text("Custom Model URL") },
+            onDismissRequest = { showGemmaSetupDialog = false },
+            title = { Text("Download Gemma AI Model") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Enter a direct download URL for a MediaPipe LLM Inference .task model (Gemma 3/4 INT4 or INT8).",
-                        style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(
-                        value = customModelUrl,
-                        onValueChange = { customModelUrl = it },
-                        label = { Text("Model URL") },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("https://…/gemma_model.task") }
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Paste your HuggingFace Read token below. " +
+                        "Get one free at huggingface.co/settings/tokens after " +
+                        "accepting the Gemma license at huggingface.co/litert-community/Gemma3-1B-IT",
+                        style = MaterialTheme.typography.bodySmall
                     )
+
+                    // HuggingFace token field
+                    OutlinedTextField(
+                        value = gemmaHfToken,
+                        onValueChange = { gemmaHfToken = it },
+                        label = { Text("HuggingFace Read Token") },
+                        placeholder = { Text("hf_xxxxxxxxxxxxxxxx") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = if (showToken)
+                            VisualTransformation.None
+                        else
+                            PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showToken = !showToken }) {
+                                Icon(
+                                    if (showToken) Icons.Default.VisibilityOff
+                                    else Icons.Default.Visibility,
+                                    contentDescription = if (showToken) "Hide token" else "Show token"
+                                )
+                            }
+                        }
+                    )
+
+                    // Optional: custom URL
+                    OutlinedTextField(
+                        value = gemmaModelUrl,
+                        onValueChange = { gemmaModelUrl = it },
+                        label = { Text("Model URL (optional — default is Gemma 3 1B INT4)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("https://huggingface.co/litert-community/…/gemma3-1b-it-cpu-int4.task") }
+                    )
+
+                    // Wi-Fi toggle
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Wi-Fi only", style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (wifiOnlyDownload) "Will wait for Wi-Fi"
+                                else "Mobile data OK",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        }
+                        Switch(checked = wifiOnlyDownload,
+                            onCheckedChange = { wifiOnlyDownload = it })
+                    }
                 }
             },
             confirmButton = {
-                Button(onClick = {
-                    if (customModelUrl.isNotBlank()) settingsViewModel.downloadGemmaModel(customModelUrl)
-                    showModelUrlDialog = false
-                }) { Text("Start Download") }
+                Button(
+                    onClick = {
+                        val url = gemmaModelUrl.ifBlank { GemmaModelManager.MODEL_URL_CPU_INT4 }
+                        settingsViewModel.downloadGemmaModel(
+                            url      = url,
+                            hfToken  = gemmaHfToken.trim(),
+                            wifiOnly = wifiOnlyDownload
+                        )
+                        showGemmaSetupDialog = false
+                    },
+                    enabled = gemmaHfToken.isNotBlank()
+                ) { Text("Start Download") }
             },
-            dismissButton = { TextButton(onClick = { showModelUrlDialog = false }) { Text("Cancel") } }
+            dismissButton = {
+                TextButton(onClick = { showGemmaSetupDialog = false }) { Text("Cancel") }
+            }
         )
     }
 }
@@ -394,7 +508,6 @@ fun DriveSetupGuide(context: android.content.Context, onDismiss: () -> Unit) {
             }
             Text("Google Sign-In requires your app's SHA-1 registered in Google Cloud Console. Do this once:",
                 style = MaterialTheme.typography.bodySmall)
-
             listOf(
                 "1. Go to console.cloud.google.com → create/select a project",
                 "2. Enable the Google Drive API",
@@ -406,12 +519,7 @@ fun DriveSetupGuide(context: android.content.Context, onDismiss: () -> Unit) {
             ).forEach { step ->
                 Text(step, style = MaterialTheme.typography.bodySmall)
             }
-
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
-            ) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Text(
                     "keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android",
                     style = MaterialTheme.typography.labelSmall,
@@ -419,7 +527,6 @@ fun DriveSetupGuide(context: android.content.Context, onDismiss: () -> Unit) {
                     modifier = Modifier.padding(10.dp)
                 )
             }
-
             Button(
                 onClick = { context.openUrl("https://console.cloud.google.com/apis/credentials") },
                 modifier = Modifier.fillMaxWidth()

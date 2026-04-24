@@ -27,7 +27,8 @@ class SettingsViewModel @Inject constructor(
 
     // ── Google Sign-In ───────────────────────────────────────────────────
 
-    fun getGoogleSignInIntent(withDriveScope: Boolean = false): Intent = googleAuthManager.getSignInIntent(withDriveScope)
+    fun getGoogleSignInIntent(withDriveScope: Boolean = false): Intent =
+        googleAuthManager.getSignInIntent(withDriveScope)
 
     fun handleGoogleSignInResult(data: Intent?) {
         googleAuthManager.handleSignInResult(data)
@@ -39,8 +40,19 @@ class SettingsViewModel @Inject constructor(
 
     // ── Gemma Model ──────────────────────────────────────────────────────
 
-    fun downloadGemmaModel(url: String = GemmaModelManager.MODEL_URL_1B, wifiOnly: Boolean = false) {
-        gemmaModelManager.startDownload(url, wifiOnly)
+    /**
+     * Start downloading the Gemma model.
+     *
+     * @param url      Direct HuggingFace resolve URL for the .task file
+     * @param hfToken  HuggingFace read token (required — Gemma is a gated model)
+     * @param wifiOnly If true, download only on Wi-Fi
+     */
+    fun downloadGemmaModel(
+        url: String = GemmaModelManager.MODEL_URL_CPU_INT4,
+        hfToken: String = "",
+        wifiOnly: Boolean = false
+    ) {
+        gemmaModelManager.startDownload(url, hfToken, wifiOnly)
     }
 
     fun cancelModelDownload() {
