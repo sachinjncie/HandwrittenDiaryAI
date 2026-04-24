@@ -35,6 +35,7 @@ fun SettingsScreen(
     var autoBackup by remember { mutableStateOf(settings.autoBackupEnabled) }
     var showModelUrlDialog by remember { mutableStateOf(false) }
     var customModelUrl by remember { mutableStateOf("") }
+    var wifiOnlyDownload by remember { mutableStateOf(false) }
     var showDriveGuide by remember { mutableStateOf(googleAuthState.needsSetup) }
 
     // Update guide visibility when auth state changes
@@ -194,15 +195,30 @@ fun SettingsScreen(
                         when (modelStatus.state) {
                             ModelDownloadState.IDLE, ModelDownloadState.FAILED -> {
                                 if (modelStatus.state == ModelDownloadState.FAILED) {
-                                    Text("Download failed: ${modelStatus.error}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.error)
+                                    Row(verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Icon(Icons.Default.Error, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                        Text(modelStatus.error ?: "Download failed",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.error)
+                                    }
                                 } else {
-                                    Text("Model not downloaded. ~537 MB — download on Wi-Fi.",
+                                    Text("Model not downloaded. ~537 MB.",
                                         style = MaterialTheme.typography.bodySmall)
                                 }
+                                // Network toggle
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Wi-Fi only", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                                        Text(if (wifiOnlyDownload) "Will wait for Wi-Fi" else "Download on any connection (mobile data OK)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                                    }
+                                    Switch(checked = wifiOnlyDownload, onCheckedChange = { wifiOnlyDownload = it })
+                                }
                                 Button(
-                                    onClick = { settingsViewModel.downloadGemmaModel() },
+                                    onClick = { settingsViewModel.downloadGemmaModel(wifiOnly = wifiOnlyDownload) },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Icon(Icons.Default.CloudDownload, null)
@@ -220,12 +236,17 @@ fun SettingsScreen(
                             }
 
                             ModelDownloadState.DOWNLOADING -> {
-                                Text(
-                                    if (modelStatus.totalMb > 0)
-                                        "Downloading… ${modelStatus.downloadedMb.toInt()} / ${modelStatus.totalMb.toInt()} MB (${modelStatus.progressPercent}%)"
-                                    else "Downloading…",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
+                                // Status detail line (queued / paused / downloading)
+                                val detailText: String = when {
+                                    modelStatus.statusDetail != null -> modelStatus.statusDetail!!
+                                    modelStatus.totalMb > 0 -> "Downloading ${modelStatus.downloadedMb.toInt()} / ${modelStatus.totalMb.toInt()} MB (${modelStatus.progressPercent}%)"
+                                    else -> "Connecting…"
+                                }
+                                Text(detailText, style = MaterialTheme.typography.bodySmall,
+                                    color = if (modelStatus.statusDetail?.contains("Wi-Fi") == true)
+                                        MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.onSurface)
+
                                 if (modelStatus.totalMb > 0) {
                                     LinearProgressIndicator(
                                         progress = { modelStatus.progressPercent / 100f },
@@ -234,6 +255,23 @@ fun SettingsScreen(
                                 } else {
                                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                                 }
+
+                                // Show "switch to mobile data" if waiting for Wi-Fi
+                                if (modelStatus.statusDetail?.contains("Wi-Fi") == true ||
+                                    modelStatus.statusDetail?.contains("network") == true) {
+                                    Button(
+                                        onClick = {
+                                            settingsViewModel.cancelModelDownload()
+                                            settingsViewModel.downloadGemmaModel(wifiOnly = false)
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.SignalCellularAlt, null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Switch to Mobile Data & Retry")
+                                    }
+                                }
+
                                 OutlinedButton(
                                     onClick = { settingsViewModel.cancelModelDownload() },
                                     modifier = Modifier.fillMaxWidth()

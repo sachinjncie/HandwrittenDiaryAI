@@ -39,8 +39,8 @@ class SettingsViewModel @Inject constructor(
 
     // ── Gemma Model ──────────────────────────────────────────────────────
 
-    fun downloadGemmaModel(url: String = GemmaModelManager.MODEL_URL_1B) {
-        gemmaModelManager.startDownload(url)
+    fun downloadGemmaModel(url: String = GemmaModelManager.MODEL_URL_1B, wifiOnly: Boolean = false) {
+        gemmaModelManager.startDownload(url, wifiOnly)
     }
 
     fun cancelModelDownload() {

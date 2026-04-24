@@ -26,7 +26,8 @@ data class ModelDownloadStatus(
     val downloadedMb: Float = 0f,
     val totalMb: Float = 0f,
     val error: String? = null,
-    val modelPath: String? = null
+    val modelPath: String? = null,
+    val statusDetail: String? = null   // human-readable DownloadManager status
 )
 
 /**
@@ -80,7 +81,7 @@ class GemmaModelManager @Inject constructor(
 
     private var activeDownloadId: Long = -1L
 
-    fun startDownload(modelUrl: String = MODEL_URL_1B) {
+    fun startDownload(modelUrl: String = MODEL_URL_1B, wifiOnly: Boolean = false) {
         if (isModelReady) {
             _status.value = ModelDownloadStatus(
                 state = ModelDownloadState.ALREADY_EXISTS,
@@ -101,8 +102,9 @@ class GemmaModelManager @Inject constructor(
                 // External files dir is writable by DownloadManager and app-private.
                 val destFile = File(modelDir, "$MODEL_FILENAME.download")
                 setDestinationUri(Uri.fromFile(destFile))
-                setAllowedOverMetered(false)
-                setAllowedOverRoaming(false)
+                // wifiOnly=true → block mobile data; wifiOnly=false → allow any connection
+                setAllowedOverMetered(!wifiOnly)
+                setAllowedOverRoaming(!wifiOnly)
                 addRequestHeader("User-Agent", "HandwrittenDiaryAI/1.0")
             }
 
@@ -139,12 +141,20 @@ class GemmaModelManager @Inject constructor(
             val percent = if (total > 0) ((downloaded * 100) / total).toInt() else 0
 
             when (dlStatus) {
-                DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PENDING -> {
+                DownloadManager.STATUS_RUNNING -> {
                     _status.value = ModelDownloadStatus(
                         state = ModelDownloadState.DOWNLOADING,
                         progressPercent = percent,
                         downloadedMb = downloaded / 1_000_000f,
-                        totalMb = total / 1_000_000f
+                        totalMb = total / 1_000_000f,
+                        statusDetail = "Downloading…"
+                    )
+                }
+                DownloadManager.STATUS_PENDING -> {
+                    _status.value = ModelDownloadStatus(
+                        state = ModelDownloadState.DOWNLOADING,
+                        progressPercent = 0,
+                        statusDetail = "Queued — waiting to start…"
                     )
                 }
                 DownloadManager.STATUS_SUCCESSFUL -> {
@@ -170,18 +180,39 @@ class GemmaModelManager @Inject constructor(
                 DownloadManager.STATUS_FAILED -> {
                     val reasonCol = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
                     val reason = cursor.getInt(reasonCol)
+                    val reasonMsg = when (reason) {
+                        DownloadManager.ERROR_CANNOT_RESUME         -> "Cannot resume — file may have changed"
+                        DownloadManager.ERROR_DEVICE_NOT_FOUND      -> "Storage not found"
+                        DownloadManager.ERROR_FILE_ALREADY_EXISTS   -> "File already exists"
+                        DownloadManager.ERROR_FILE_ERROR            -> "File write error — check storage space"
+                        DownloadManager.ERROR_HTTP_DATA_ERROR        -> "HTTP data error — try again"
+                        DownloadManager.ERROR_INSUFFICIENT_SPACE     -> "Not enough storage space"
+                        DownloadManager.ERROR_TOO_MANY_REDIRECTS    -> "Too many redirects — check URL"
+                        DownloadManager.ERROR_UNHANDLED_HTTP_CODE   -> "Server error — check URL"
+                        DownloadManager.ERROR_UNKNOWN               -> "Unknown error — check your connection"
+                        else -> "Failed (code $reason)"
+                    }
                     activeDownloadId = -1L
                     _status.value = ModelDownloadStatus(
                         state = ModelDownloadState.FAILED,
-                        error = "Download failed (code $reason). Check your connection and try again."
+                        error = reasonMsg
                     )
                 }
                 DownloadManager.STATUS_PAUSED -> {
+                    val reasonCol2 = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
+                    val pauseReason = cursor.getInt(reasonCol2)
+                    val pauseMsg = when (pauseReason) {
+                        DownloadManager.PAUSED_WAITING_FOR_NETWORK -> "Waiting for network…"
+                        DownloadManager.PAUSED_WAITING_TO_RETRY    -> "Waiting to retry…"
+                        DownloadManager.PAUSED_QUEUED_FOR_WIFI     -> "Waiting for Wi-Fi — tap to switch to mobile data"
+                        else -> "Paused (reason $pauseReason)"
+                    }
                     _status.value = _status.value.copy(
                         state = ModelDownloadState.DOWNLOADING,
                         progressPercent = percent,
                         downloadedMb = downloaded / 1_000_000f,
-                        totalMb = total / 1_000_000f
+                        totalMb = total / 1_000_000f,
+                        statusDetail = pauseMsg
                     )
                 }
             }
